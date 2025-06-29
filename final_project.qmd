@@ -1,0 +1,713 @@
+---
+title: "GAPMINDER | CHILD MORTALITY & FEMALE (15-44) EDUCATION (1970-2009)"
+format:
+  dashboard:
+    embed-resources: false
+theme: yeti
+author: "Collins Otieno Omenda"
+---
+
+```{r}
+if(!require(pacman)) install.packages("pacman")
+pacman::p_load(tidyverse, gapminder, bslib, 
+               bsicons, shiny, here, sf,
+               rnaturalearth, plotly, stargazer,
+               countrycode, htmltools, reactable, WDI)
+```
+
+
+
+```{r}
+child_mortality <- read_csv(here("data/child_mortality_0_5.csv"))
+year_in_school <- read_csv(here("data/mean_years_in_school.csv"))
+
+child_mortality_long <- child_mortality %>%
+  pivot_longer(
+    cols = -country,                      
+    names_to = "year",                
+    values_to = "child_mortality_rate_per_1000"   
+  ) %>%
+  mutate(year = as.integer(year)) 
+
+year_in_school_long <- year_in_school %>%
+  pivot_longer(
+    cols = -country,                      
+    names_to = "year",                
+    values_to = "mean_years_in_school_women_15_to_44"   
+  ) %>%
+  mutate(year = as.integer(year))
+
+
+child_mortality_education_all <- left_join(
+  child_mortality_long,
+  year_in_school_long,
+  by = c("country", "year")) %>% 
+    filter(year >= 1970, year <= 2009)
+
+child_mortality_education_all <- child_mortality_education_all %>% 
+  mutate(country_code = countrycode(country, 
+                                    "country.name",
+                                    "iso3c"))
+  
+country_shapes <- rnaturalearth::ne_countries()
+
+
+# Creating a table of average child mortality and years in school by continent
+
+cm_ed <- left_join(country_shapes, child_mortality_education_all, by = c("adm0_a3" = "country_code")) %>% 
+  st_drop_geometry() %>% 
+  select(continent, child_mortality_rate_per_1000, mean_years_in_school_women_15_to_44) %>% 
+  group_by(continent) %>% 
+  summarise(avg_child_mortality = round(mean(child_mortality_rate_per_1000, na.rm = TRUE), 1), avg_years_school_women = round(mean(mean_years_in_school_women_15_to_44, na.rm = TRUE), 1), .groups = "drop") %>% 
+  filter(!is.na(avg_child_mortality) & !is.na(avg_years_school_women))
+
+```
+
+
+```{r}
+# Identifying country with highest child mortality rate
+
+highest_mortality_country <- child_mortality_education_all %>% 
+  arrange(-child_mortality_rate_per_1000) %>% 
+  head(1) %>% 
+  pull(country)
+
+highest_mortality_value <- child_mortality_education_all %>% 
+  arrange(-child_mortality_rate_per_1000) %>% 
+  head(1) %>% 
+  pull(child_mortality_rate_per_1000) %>% 
+  round(1)
+
+highest_mortality_year <- child_mortality_education_all %>% 
+  arrange(-child_mortality_rate_per_1000) %>% 
+  head(1) %>% 
+  pull(year)
+
+# Identifying country  with the lowest child mortality rate
+lowest_mortality_country <- child_mortality_education_all %>% 
+  arrange(child_mortality_rate_per_1000) %>% 
+  head(1) %>% 
+  pull(country)
+
+lowest_mortality_value <- child_mortality_education_all %>% 
+  arrange(child_mortality_rate_per_1000) %>% 
+  head(1) %>% 
+  pull(child_mortality_rate_per_1000) %>% 
+  round(1)
+
+lowest_mortality_year <- child_mortality_education_all %>% 
+  arrange(child_mortality_rate_per_1000) %>% 
+  head(1) %>% 
+  pull(year)
+```
+
+
+```{r}
+# Identifying country with highest mean years in school (women)
+
+highest_yearsinschool_country <- child_mortality_education_all %>% 
+  arrange(-mean_years_in_school_women_15_to_44) %>% 
+  head(1) %>% 
+  pull(country)
+
+highest_yearsinschool_value <- child_mortality_education_all %>% 
+  arrange(-mean_years_in_school_women_15_to_44) %>% 
+  head(1) %>% 
+  pull(mean_years_in_school_women_15_to_44) %>% 
+  round(1)
+
+highest_yearsinschool_year <- child_mortality_education_all %>% 
+  arrange(-mean_years_in_school_women_15_to_44) %>% 
+  head(1) %>% 
+  pull(year)
+
+# Identifying country with lowest mean years in school (women)
+lowest_yearsinschool_country <- child_mortality_education_all %>% 
+  arrange(mean_years_in_school_women_15_to_44) %>% 
+  head(1) %>% 
+  pull(country)
+
+lowest_yearsinschool_value <- child_mortality_education_all %>% 
+  arrange(mean_years_in_school_women_15_to_44) %>% 
+  head(1) %>% 
+  pull(mean_years_in_school_women_15_to_44) %>% 
+  round(1)
+
+lowest_yearsinschool_year <- child_mortality_education_all %>% 
+  arrange(mean_years_in_school_women_15_to_44) %>% 
+  head(1) %>% 
+  pull(year)
+
+```
+
+
+
+```{r}
+# Creating world map based on average child mortality
+
+avg_mortality_by_country_all <- child_mortality_education_all %>%
+  group_by(country) %>%
+  summarise(avg_mortality = mean(child_mortality_rate_per_1000, na.rm = TRUE),
+            .groups = "drop")
+
+avg_mortality_by_country_all <- 
+  avg_mortality_by_country_all %>% 
+  mutate(country_code = countrycode(country, 
+                                    "country.name", 
+                                    "iso3c"))
+
+
+# setdiff(avg_mortality$country_code, country_shapes$adm0_a3)
+
+gap_map <- left_join(country_shapes, avg_mortality_by_country_all, by = c("adm0_a3" = "country_code")) %>% 
+  mutate(tooltip_label = paste(country, round(avg_mortality, 1), sep = ": ")) %>% 
+  ggplot()+
+  geom_sf(aes(fill = avg_mortality, text = tooltip_label))+
+  theme_void()+
+  theme(legend.position = "none")
+
+gapmap_ggplotly <- ggplotly(gap_map, tooltip = "text")
+
+```
+
+
+
+```{r}
+# Creating world map based on mean years in school (women)
+country_shapes <- rnaturalearth::ne_countries()
+
+child_mortality_education_all <- child_mortality_education_all %>% 
+  mutate(country_code = countrycode(country, 
+                                    "country.name", 
+                                    "iso3c"))
+
+avg_yearsinschool_by_country_all <- child_mortality_education_all %>%
+  group_by(country) %>%
+  summarise(avg_yearsinschool = mean(mean_years_in_school_women_15_to_44, 
+                                     na.rm = TRUE), .groups = "drop")
+
+avg_yearsinschool_by_country_all <- 
+  avg_yearsinschool_by_country_all %>% 
+  mutate(country_code = countrycode(country, 
+                                    "country.name", 
+                                    "iso3c"))
+
+
+# setdiff(avg_mortality$country_code, country_shapes$adm0_a3)
+
+gap_map0 <- left_join(country_shapes, avg_yearsinschool_by_country_all, by = c("adm0_a3" = "country_code")) %>% 
+  mutate(tooltip_label = paste(country, round(avg_yearsinschool, 1), sep = ": ")) %>% 
+  ggplot()+
+  geom_sf(aes(fill = avg_yearsinschool, text = tooltip_label))+
+  theme_void()+
+  theme(legend.position = "none")
+
+gapmap_ggplotly0 <- ggplotly(gap_map0, tooltip = "text")
+```
+
+
+```{r}
+# Eastern African Countries
+
+gap_map2 <- left_join(country_shapes,
+                     child_mortality_education_all,
+                     by = c("adm0_a3" = "country_code")) %>%
+  filter(subregion == "Eastern Africa" & year == 2009) %>% 
+  mutate(tooltip_label = paste(country, round(child_mortality_rate_per_1000, 1), sep = ": ")) %>%
+  ggplot() +
+  geom_sf(aes(fill = child_mortality_rate_per_1000, text = tooltip_label)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+gapmap_ggplotly2 <- ggplotly(gap_map2, tooltip = "text")
+```
+
+```{r}
+# Eastern African Countries by Life Expectancy
+
+ea_countries <- left_join(country_shapes,
+                     child_mortality_education_all,
+                     by = c("adm0_a3" = "country_code")) %>%
+  filter(subregion == "Eastern Africa" & year == 2009) %>% 
+  mutate(tooltip_label = paste(country, round(child_mortality_rate_per_1000, 1), sep = ": ")) %>%
+  ggplot(aes(y = reorder(country, child_mortality_rate_per_1000), 
+             x = child_mortality_rate_per_1000, 
+             fill = child_mortality_rate_per_1000,
+             text = tooltip_label))+
+  geom_col()+
+  geom_text(aes(label = round(child_mortality_rate_per_1000, 1)),
+            nudge_x = -10,
+            color = "white", size = 2)+
+  labs(y = "Country",
+       x = "Child Mortality Rate Per 1,000 Live Births")+
+  theme(legend.position = "none",
+        axis.title.y = element_text(size = 10))
+
+ea_countries_ggplotly <- ggplotly(ea_countries, tooltip = "text")
+```
+
+
+```{r}
+ea_countries_data09 <- left_join(country_shapes,
+                     child_mortality_education_all,
+                     by = c("adm0_a3" = "country_code")) %>%
+  st_drop_geometry() %>% 
+  filter(subregion == "Eastern Africa" & year == 2009) %>%
+  select(country, child_mortality_rate_per_1000, mean_years_in_school_women_15_to_44) %>%
+  rename(`Child Mortality` = child_mortality_rate_per_1000, `Years in School` = mean_years_in_school_women_15_to_44) %>% 
+  arrange(`Child Mortality`)
+```
+
+
+```{r}
+# Identifying Eastern African country with highest child mortality in 2009
+
+highest_cm_country <- ea_countries_data09 %>% 
+  arrange(-`Child Mortality`) %>% 
+  head(1) %>% 
+  pull(country)
+
+highest_cm_value <- ea_countries_data09 %>% 
+  arrange(-`Child Mortality`) %>% 
+  head(1) %>% 
+  pull(`Child Mortality`) %>% 
+  round(1)
+
+
+# Identifying EA country  with the lowest child mortality rate
+lowest_cm_country <- ea_countries_data09 %>% 
+  arrange(`Child Mortality`) %>% 
+  head(1) %>% 
+  pull(country)
+
+lowest_cm_value <- ea_countries_data09 %>% 
+  arrange(`Child Mortality`) %>% 
+  head(1) %>% 
+  pull(`Child Mortality`) %>% 
+  round(1)
+
+average_childmortality_rate <- 
+  ea_countries_data09 %>% 
+  summarise(average_cm = mean(`Child Mortality`) ) %>%
+  round(1)
+```
+
+
+```{r}
+ea_countries_data <- left_join(country_shapes,
+                     child_mortality_education_all,
+                     by = c("adm0_a3" = "country_code")) %>%
+  st_drop_geometry() %>% 
+  filter(subregion == "Eastern Africa") %>%
+  select(country, year, child_mortality_rate_per_1000, mean_years_in_school_women_15_to_44)
+```
+
+
+```{r}
+## Descriptive Charts
+# Box plots for child mortality
+box_cm_country <- ggplot(ea_countries_data, aes(x = country, y = child_mortality_rate_per_1000, fill = country)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Child Mortality Rate by Country", y = "Mortality Rate", x = "") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+box_cm_country <- ggplotly(box_cm_country)
+
+
+# Box plots for mean years in school
+box_sh_country <- ggplot(ea_countries_data, aes(x = country, y = mean_years_in_school_women_15_to_44, fill = country)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Female Education by Country", y = "Mean Years", x = "") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+box_sh_country <- ggplotly(box_sh_country)
+```
+
+
+```{r}
+## Histogram of child mortality rate (overall)
+
+hist_cm_ea <- ggplot(ea_countries_data, aes(x = child_mortality_rate_per_1000)) +
+  geom_histogram(binwidth = 10, fill = "steelblue", color = "white") +
+  labs(title = "Histogram of Child Mortality Rates", x = "Mortality Rate", y = "Frequency") +
+  theme_minimal()
+
+hist_cm_ea <- ggplotly(hist_cm_ea)
+
+```
+
+```{r}
+## Histogram of mean years in school (overall)
+
+hist_sh_ea <- ggplot(ea_countries_data, aes(x = mean_years_in_school_women_15_to_44)) +
+  geom_histogram(binwidth = 0.5, fill = "forestgreen", color = "white") +
+  labs(title = "Histogram of Female Education (15–44)", x = "Years in School", y = "Frequency") +
+  theme_minimal()
+
+hist_sh_ea <- ggplotly(hist_sh_ea)
+```
+
+
+
+```{r}
+## Trend Plots
+
+country_line <- 
+  ggplot(ea_countries_data, aes(x = year)) +
+  geom_line(aes(y = round(child_mortality_rate_per_1000,1))) +
+  facet_wrap(~ country, scales = "free_y") +
+  labs(title = "Trends in Child Mortality (1970–2009)",
+       x = "Year", y = "Value", color = "Indicator") +
+  theme_minimal()+
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+country_line <- ggplotly(country_line)
+```
+
+
+```{r}
+school_line <- 
+  ggplot(ea_countries_data, aes(x = year)) +
+  geom_line(aes(y = round(mean_years_in_school_women_15_to_44,1)), color = "blue") +
+  facet_wrap(~ country, scales = "free_y") +
+  labs(title = "Trends in Female Education (1970–2009)",
+       x = "Year", y = "Value") +
+  theme_minimal()+
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+school_line <- ggplotly(school_line)
+```
+
+
+
+```{r}
+# Scatterplots for Each Country showing Years in School vs. Child Mortality
+
+country_scatter <- ggplot(ea_countries_data, aes(x = round(mean_years_in_school_women_15_to_44,1),
+                              y = round(child_mortality_rate_per_1000,1))) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "green") +
+  facet_wrap(~ country, scales = "free") +
+  labs(title = "Female Education vs. Child Mortality (1970–2009)",
+       x = "Mean Years of School (Women 15–44)",
+       y = "Child Mortality Rate per 1000 Live Births") +
+  theme_minimal()+
+  theme(legend.position = "none")
+
+country_scatter <- ggplotly(country_scatter)
+```
+
+
+```{r}
+## Creating a correlation heatmap for Eastern African Countries
+
+# Filter out rows with missing key data
+clean_data <- ea_countries_data %>%
+  filter(!is.na(country),
+         !is.na(child_mortality_rate_per_1000),
+         !is.na(mean_years_in_school_women_15_to_44))
+
+# Safely calculate correlation per country
+cor_data <- clean_data %>%
+  group_by(country) %>%
+  filter(n() >= 3) %>%  # Ensure enough data points for correlation
+  summarise(
+    correlation = cor(child_mortality_rate_per_1000,
+                      mean_years_in_school_women_15_to_44,
+                      use = "complete.obs")
+  ) %>% 
+  mutate(tooltip_label = paste(country, round(correlation, 3), sep = ": ")) 
+
+# Plot correlation heatmap
+heatmap <- ggplot(cor_data, aes(x = country, y = "Correlation", text = tooltip_label)) +
+  geom_tile(aes(fill = correlation), color = "white") +
+  geom_text(aes(label = round(correlation, 3)), color = "black", size = 3) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0,
+                       name = "Pearson Correlation") +
+  labs(title = "Correlation between Child Mortality and Female Education by Country",
+       x = "Country", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none")
+
+heatmap <- ggplotly(heatmap, tooltip = "text")
+```
+
+```{r}
+# Regression analysis
+model <- lm(child_mortality_rate_per_1000 ~ mean_years_in_school_women_15_to_44, data = ea_countries_data)
+```
+
+
+
+# HOME
+
+## Row 1 {height=30%}
+
+```{r}
+value_box(
+  title = "Highest Child Mortality Rate per 1,000 Live Births",
+  value = highest_mortality_value,
+  showcase = bsicons::bs_icon("exclamation-triangle-fill"),
+  theme = value_box_theme(bg="#338736"),
+  p(paste0("(", highest_mortality_country, ", ", highest_mortality_year, ")"))
+)
+```
+
+```{r}
+value_box(
+  title = "Lowest Child Mortality Rate per 1,000 Live Births",
+  value = lowest_mortality_value,
+  showcase = bsicons::bs_icon("balloon-heart-fill"),
+  theme = value_box_theme(bg="#31e038"),
+  p(paste0("(", lowest_mortality_country, ", ", lowest_mortality_year, ")"))
+)
+```
+
+```{r}
+value_box(
+  title = "Highest Mean Years in School",
+  value = highest_yearsinschool_value,
+  showcase = bsicons::bs_icon("emoji-smile-fill"),
+  theme = value_box_theme(bg="#2d317a"),
+  p(paste0("(", highest_yearsinschool_country, ", ", highest_yearsinschool_year, ")"))
+)
+```
+
+
+```{r}
+value_box(
+  title = "Lowest Mean Years in School",
+  value = lowest_yearsinschool_value,
+  showcase = bsicons::bs_icon("journal-x"),
+  theme = value_box_theme(bg="#2730e3"),
+  p(paste0("(", lowest_yearsinschool_country, "z, ", lowest_yearsinschool_year, ")"))
+)
+```
+
+
+## Row 2 {height=70%}
+
+### {width=65%}
+
+```{r title = "Map of Countries by Child Mortality (0-5 Years)"}
+gapmap_ggplotly
+```
+
+
+### {width=35%}
+
+```{r title = "A Table of Average Child Mortality Rate and Years in School by Continent"}
+reactable(cm_ed)
+```
+
+# EASTERN AFRICA (2009)
+
+## Row 1 {height=35%}
+
+```{r}
+value_box(
+  title = "Highest Child Mortality Rate per 1,000 Live Births",
+  value = highest_cm_value,
+  showcase = bsicons::bs_icon("exclamation-triangle-fill"),
+  theme = value_box_theme(bg="#338739"),
+  p(paste0("(", highest_cm_country, ")"))
+)
+```
+
+```{r}
+value_box(
+  title = "Lowest Child Mortality Rate per 1,000 Live Births",
+  value = lowest_cm_value,
+  showcase = bsicons::bs_icon("emoji-smile"),
+  theme = value_box_theme(bg="#338756"),
+  p(paste0("(", lowest_cm_country, ")"))
+)
+  
+```
+
+```{r}
+value_box(
+  title = "Average Child Mortality Rate Per 1,000 Live Births",
+  value = average_childmortality_rate,
+  showcase = bsicons::bs_icon("circle-half"),
+  theme = value_box_theme(bg="#338716")
+)
+```
+
+
+## Row 2 {height=65%}
+
+### {width=30%}
+
+```{r title = "Map of Eastern African Countries by Child Mortality (0-5 Years)"}
+gapmap_ggplotly2
+```
+
+### {width=40%}
+
+```{r title = "Eastern African Countries by Child Mortality (0-5 Years)"}
+ea_countries_ggplotly
+```
+
+### {width=30%}
+
+```{r title = "Child Mortality and Mean Years in School (Women aged 15-24) for EA Countries"}
+reactable(ea_countries_data09)
+```
+
+# DESCRIPTIVE ANALYSIS 
+
+## Row 1 {height=60%}
+
+### {width=60%}
+
+```{r title = "Box Plots of Child Mortality by Country"}
+box_cm_country
+```
+
+### {width=40%}
+
+```{r title = "Box Plots of Years of Schooling by Country"}
+box_sh_country
+```
+
+
+## Row 2 {height=40%}
+
+### {width=35%}
+
+```{r title = "Histogram of Child Mortality Rate"}
+hist_cm_ea
+```
+
+### {width=35%}
+
+```{r title = "Histogram of Years of Schooling"}
+hist_sh_ea
+```
+
+### {width=30%}
+
+The distribution of the child mortality rate per 1,000 live births exhibits a trimodal pattern, with three distinct peaks observed at approximately 100, 170, and 240. This suggests that the dataset likely includes three subgroups of countries or time periods with differing child mortality profiles, possibly reflecting varying stages of development or public health interventions across Eastern Africa. The presence of multiple modes indicates that child mortality does not follow a single unified trend across the region but instead clusters around these three distinct levels.
+
+In contrast, the mean years of schooling for women aged 15–44 is right-skewed, meaning that while most women fall within a lower range of mean years in school, a smaller number attain significantly higher levels of education. When broken down by country, the distribution of female education appears approximately normal within each country, suggesting relatively balanced variation in educational attainment domestically. However, the distribution of child mortality by country is more variable, with some countries (e.g., Burundi) showing right-skewness, while others (e.g., Malawi) display left-skewness.
+
+
+# SPATIAL-TEMPORAL PATTERNS
+
+## Row 1 {height=50%}
+
+### {width=50%}
+
+```{r}
+country_line
+```
+
+### {width=50%}
+
+```{r}
+school_line
+```
+
+
+## Row 2 {heigh=50%}
+
+### {width=70%}
+
+```{r}
+country_scatter
+```
+
+### {width=30%}
+
+The trend plots reveal a consistent decline in child mortality rates over time across Eastern African countries. Conversely, there is a steady upward trend in the mean years of schooling completed by women aged 15 to 44. 
+
+The scatterplots illustrate a clear negative association between female educational attainment and child mortality rates: as women of reproductive age (15–44 years) complete more years of schooling, the child mortality rate per 1,000 live births declines.
+
+# CORRELATION & REGRESSION
+
+## Row 1 {height=60%}
+
+### {width=50%}
+
+```{r title = "Association between Mean Years in School and Child Mortality"}
+scat1 <- ggplot(ea_countries_data, aes(x = mean_years_in_school_women_15_to_44,
+                              y = child_mortality_rate_per_1000)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(
+    title = "Correlation: Child Mortality vs. Female Education",
+    x = "Mean Years of Schooling (Women 15–44)",
+    y = "Child Mortality Rate per 1000"
+  ) +
+  theme_minimal()
+
+ggplotly(scat1)
+```
+
+
+### {width=50%}
+
+```{r title = "Correlation Heatmap"}
+ggplotly(heatmap)
+```
+
+
+## Row 2 {height=40%}
+
+### {width=50%}
+
+```{r title = "Simple Linear Regression Output"}
+
+stargazer(model, type = "text", title = "Regression Results")
+
+```
+
+
+### {width=50%}
+
+*Interpretation of Results*
+
+A correlation analysis was conducted to examine the relationship between the mean years of schooling and the child mortality rate per 1,000 live births among women aged 15–44 in the Eastern African region. Ethiopia exhibited the strongest correlation, with a Pearson correlation coefficient of –0.997, while Zimbabwe showed the weakest correlation at –0.29. The direction of the relationship between these two variables remained consistent across countries, with most exhibiting coefficients above –0.7, indicating a strong negative association.
+
+The regression results indicate a strong and statistically significant negative relationship between female educational attainment and child mortality rates in Eastern Africa. Specifically, for every additional year of schooling completed by women aged 15 to 44, the child mortality rate decreases by approximately 19.1 deaths per 1,000 live births. This coefficient is significant at the 1% level, suggesting a robust association. The constant term, 218.2, represents the predicted child mortality rate when female education is zero. However, it is more of a theoretical reference point than a practical scenario in the region.
+
+The model explains approximately 43.7% of the variation in child mortality rates, as indicated by the R-squared value. This demonstrates a substantial explanatory power for a simple linear regression. These findings highlight the critical role of female education in improving child survival outcomes, reinforcing the need for education-focused interventions as a strategy to reduce child mortality across the Eastern African region.
+
+# DOWNLOAD DATA
+
+```{r}
+htmltools::browsable(
+  tagList(
+    reactable(child_mortality_education_all,
+      elementId = "gapminder-table",
+      searchable = T, 
+      filterable = T
+    ),
+     tags$button("Download as CSV", onclick = 
+              "Reactable.downloadDataCSV('gapminder-table')")
+  )
+)
+```
+
+
+# ABOUT
+
+This data comes from the [gapminder repositories](https://www.gapminder.org/data/), and is sourced from the Gapminder Foundation.
+
+Gapminder Foundation is a non-profit venture registered in Stockholm, Sweden, that promotes sustainable global development and achievement of the United Nations Millennium Development Goals by increased use and understanding of statistics and other information about social, economic, and environmental development at local, national, and global levels.
+
+Gapminder was founded in 2005 by Ola Rosling, Anna Rosling Rönnlund, and Hans Rosling. The name Gapminder was derived from the "Mind the Gap" warning messages on the London Underground.
+
+An example of one of Hans Rosling's videos is shown below:
+
+<div style="max-width:1024px"><div style="position:relative;height:0;padding-bottom:56.25%"><iframe src="https://embed.ted.com/talks/hans_rosling_religions_and_babies" width="1024px" height="576px" title="Religions and babies" style="position:absolute;left:0;top:0;width:100%;height:100%"  frameborder="0" scrolling="no" allowfullscreen onload="window.parent.postMessage('iframeLoaded', 'https://embed.ted.com')"></iframe></div></div>
