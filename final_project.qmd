@@ -299,7 +299,8 @@ ea_countries_data <- left_join(country_shapes,
                      by = c("adm0_a3" = "country_code")) %>%
   st_drop_geometry() %>% 
   filter(subregion == "Eastern Africa") %>%
-  select(country, year, child_mortality_rate_per_1000, mean_years_in_school_women_15_to_44)
+  select(country, year, child_mortality_rate_per_1000, mean_years_in_school_women_15_to_44) %>% 
+  filter(!is.na(country))
 ```
 
 
@@ -602,7 +603,7 @@ The distribution of the child mortality rate per 1,000 live births exhibits a tr
 In contrast, the mean years of schooling for women aged 15–44 is right-skewed, meaning that while most women fall within a lower range of mean years in school, a smaller number attain significantly higher levels of education. When broken down by country, the distribution of female education appears approximately normal within each country, suggesting relatively balanced variation in educational attainment domestically. However, the distribution of child mortality by country is more variable, with some countries (e.g., Burundi) showing right-skewness, while others (e.g., Malawi) display left-skewness.
 
 
-# SPATIAL-TEMPORAL PATTERNS
+# SPATIO-TEMPORAL PATTERNS
 
 ## Row 1 {height=50%}
 
